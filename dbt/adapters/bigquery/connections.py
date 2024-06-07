@@ -139,6 +139,7 @@ class BigQueryCredentials(Credentials):
     dataproc_region: Optional[str] = None
     dataproc_cluster_name: Optional[str] = None
     gcs_bucket: Optional[str] = None
+    spark_external_connection_name: Optional[str] = None
 
     dataproc_batch: Optional[DataprocBatchConfig] = field(
         metadata={
@@ -203,6 +204,7 @@ class BigQueryCredentials(Credentials):
             "dataproc_cluster_name",
             "gcs_bucket",
             "dataproc_batch",
+            "spark_external_connection_name"
         )
 
     @classmethod

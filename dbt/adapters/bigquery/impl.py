@@ -49,6 +49,7 @@ from dbt.adapters.bigquery.dataset import add_access_entry_to_dataset, is_access
 from dbt.adapters.bigquery.python_submissions import (
     ClusterDataprocHelper,
     ServerlessDataProcHelper,
+    DataProcStoredProcedureHelper
 )
 from dbt.adapters.bigquery.relation import BigQueryRelation
 from dbt.adapters.bigquery.relation_configs import (
@@ -903,13 +904,14 @@ class BigQueryAdapter(BaseAdapter):
 
     @property
     def default_python_submission_method(self) -> str:
-        return "serverless"
+        return "stored_procedure"
 
     @property
     def python_submission_helpers(self) -> Dict[str, Type[PythonJobHelper]]:
         return {
             "cluster": ClusterDataprocHelper,
             "serverless": ServerlessDataProcHelper,
+            "stored_procedure": DataProcStoredProcedureHelper
         }
 
     @available

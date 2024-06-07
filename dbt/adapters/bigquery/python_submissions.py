@@ -11,6 +11,7 @@ from google.api_core import retry
 from google.api_core.client_options import ClientOptions
 from google.cloud import storage, dataproc_v1  # type: ignore
 from google.cloud.dataproc_v1.types.batches import Batch
+from google.cloud import bigquery_connection_v1
 
 from dbt.adapters.bigquery.dataproc.batch import (
     create_batch_request,
@@ -47,9 +48,12 @@ class BaseDataProcHelper(PythonJobHelper):
         self.credential = credential
         self.GoogleCredentials = BigQueryConnectionManager.get_credentials(credential)
         self.storage_client = storage.Client(
-            project=self.credential.execution_project, credentials=self.GoogleCredentials
+            project=self.credential.execution_project,
+            credentials=self.GoogleCredentials,
         )
-        self.gcs_location = "gs://{}/{}".format(self.credential.gcs_bucket, self.model_file_name)
+        self.gcs_location = "gs://{}/{}".format(
+            self.credential.gcs_bucket, self.model_file_name
+        )
 
         # set retry policy, default to timeout after 24 hours
         self.timeout = self.parsed_model["config"].get(
@@ -59,7 +63,9 @@ class BaseDataProcHelper(PythonJobHelper):
             predicate=POLLING_PREDICATE, maximum=10.0, timeout=self.timeout
         )
         self.client_options = ClientOptions(
-            api_endpoint="{}-dataproc.googleapis.com:443".format(self.credential.dataproc_region)
+            api_endpoint="{}-dataproc.googleapis.com:443".format(
+                self.credential.dataproc_region
+            )
         )
         self.job_client = self._get_job_client()
 
@@ -81,6 +87,84 @@ class BaseDataProcHelper(PythonJobHelper):
 
     def _submit_dataproc_job(self) -> dataproc_v1.types.jobs.Job:
         raise NotImplementedError("_submit_dataproc_job not implemented")
+
+
+class DataProcStoredProcedureHelper(BaseDataProcHelper):
+    def _submit_dataproc_job(self):
+        python_required_configs = ["spark_external_connection_name"]
+        for required_config in python_required_configs:
+            if not getattr(self.credential, required_config):
+                raise ValueError(
+                    f"Need to supply {required_config} in profile to submit python job"
+                )
+
+        database = self.parsed_model["database"]
+        schema = self.parsed_model["schema"]
+        conn_name = (
+            self.credential.spark_external_connection_name
+            or f"spark-dbt-{database}-{schema}"
+        )
+        conn_name = self._get_or_create_ext_conn(conn_name)
+        sproc_name, sproc_ddl = self._get_stored_procedure_ddl(conn_name)
+        sproc_call = self._get_call_stored_procedure(sproc_name)
+        client = BigQueryConnectionManager.get_bigquery_client(self.credential)
+        client.query_and_wait(sproc_ddl)
+        client.query_and_wait(sproc_call)
+
+    def _get_uuid(self):
+        return str(uuid.uuid4()).replace("-", "_")
+
+    def _get_or_create_ext_conn(self, conn_name):
+        conn_client = bigquery_connection_v1.ConnectionServiceClient()
+        database = self.parsed_model["database"]
+        region = self.credential.dataproc_region
+        parent = f"projects/{database}/locations/{region}"
+
+        request = bigquery_connection_v1.ListConnectionsRequest(parent=parent)
+        existing_connections = conn_client.list_connections(request=request)
+
+        for conn in existing_connections:
+            if conn.name.rsplit("/", 1)[-1] == conn_name:
+                return conn_name
+
+        connection = bigquery_connection_v1.Connection(
+            friendly_name=conn_name, spark=bigquery_connection_v1.SparkProperties()
+        )
+        # This will create a new connection, but still needs to grant reader permissions on the bucket where
+        # the code is stored
+        response = conn_client.create_connection(
+            request={
+                "parent": parent,
+                "connection_id": conn_name,
+                "connection": connection,
+            }
+        )
+        return response.name.rsplit("/", 1)[-1]
+
+    def _get_stored_procedure_ddl(self, conn_name):
+        schema = self.parsed_model["schema"]
+        database = self.parsed_model["database"]
+        identifier = self.parsed_model["alias"]
+        gcs_code_location_uri = self.gcs_location
+        uuid = self._get_uuid()
+        sproc_name = f"{database}.{schema}.{identifier}__{uuid}"
+        sproc_ddl = f"""
+        CREATE PROCEDURE `{sproc_name}`()
+        EXTERNAL SECURITY INVOKER
+        WITH CONNECTION `{database}.{self.credential.dataproc_region}.{conn_name}`
+        OPTIONS(engine="SPARK", runtime_version="1.1", main_file_uri="{gcs_code_location_uri}")
+        LANGUAGE PYTHON"""
+        return sproc_name, sproc_ddl
+
+    def _get_call_stored_procedure(self, sproc_name):
+        # This would enforce using the dbt SA account
+        return f"""
+        SET @@spark_proc_properties.service_account='{self.GoogleCredentials._service_account_email}';
+        CALL `{sproc_name}`()
+        """
+
+    def _get_job_client(self):
+        pass
 
 
 class ClusterDataprocHelper(BaseDataProcHelper):
