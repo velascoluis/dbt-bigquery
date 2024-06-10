@@ -158,7 +158,10 @@ class DataProcStoredProcedureHelper(BaseDataProcHelper):
 
     def _get_call_stored_procedure(self, sproc_name):
         # This would enforce using the dbt SA account
+        schema = self.parsed_model["schema"]
         return f"""
+        SET @@spark_proc_properties.staging_bucket='{self.credential.gcs_bucket}';
+        SET @@spark_proc_properties.staging_dataset_id='{schema}';
         SET @@spark_proc_properties.service_account='{self.GoogleCredentials._service_account_email}';
         CALL `{sproc_name}`()
         """
