@@ -111,7 +111,7 @@ class DataProcStoredProcedureHelper(BaseDataProcHelper):
     def _get_or_create_ext_conn(self, conn_name):
         conn_client = bigquery_connection_v1.ConnectionServiceClient()
         database = self.parsed_model["database"]
-        region = self.credential.dataproc_region
+        region = self.credential.location
         parent = f"projects/{database}/locations/{region}"
 
         request = bigquery_connection_v1.ListConnectionsRequest(parent=parent)
