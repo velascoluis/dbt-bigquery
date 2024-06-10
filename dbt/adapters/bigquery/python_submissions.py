@@ -61,11 +61,6 @@ class BaseDataProcHelper(PythonJobHelper):
         self.result_polling_policy = retry.Retry(
             predicate=POLLING_PREDICATE, maximum=10.0, timeout=self.timeout
         )
-        self.client_options = ClientOptions(
-            api_endpoint="{}-dataproc.googleapis.com:443".format(
-                self.credential.dataproc_region
-            )
-        )
         self.job_client = self._get_job_client()
 
     def _upload_to_gcs(self, filename: str, compiled_code: str) -> None:
@@ -175,6 +170,19 @@ class ClusterDataprocHelper(BaseDataProcHelper):
             raise ValueError(
                 "Need to supply dataproc_cluster_name in profile or config to submit python job with cluster submission method"
             )
+        python_required_configs = [
+            "dataproc_region"
+        ]
+        for required_config in python_required_configs:
+            if not getattr(self.credential, required_config):
+                raise ValueError(
+                    f"Need to supply {required_config} in profile to submit python job"
+                )
+        self.client_options = ClientOptions(
+            api_endpoint="{}-dataproc.googleapis.com:443".format(
+                self.credential.dataproc_region
+            )
+        )
         return dataproc_v1.JobControllerClient(  # type: ignore
             client_options=self.client_options, credentials=self.GoogleCredentials
         )
@@ -185,15 +193,6 @@ class ClusterDataprocHelper(BaseDataProcHelper):
         )
 
     def _submit_dataproc_job(self) -> dataproc_v1.types.jobs.Job:
-        python_required_configs = [
-            "dataproc_region"
-        ]
-        for required_config in python_required_configs:
-            if not getattr(self.credential, required_config):
-                raise ValueError(
-                    f"Need to supply {required_config} in profile to submit python job"
-                )
-            
         job = {
             "placement": {"cluster_name": self._get_cluster_name()},
             "pyspark_job": {
@@ -216,6 +215,19 @@ class ClusterDataprocHelper(BaseDataProcHelper):
 
 class ServerlessDataProcHelper(BaseDataProcHelper):
     def _get_job_client(self) -> dataproc_v1.BatchControllerClient:
+        python_required_configs = [
+            "dataproc_region"
+        ]
+        for required_config in python_required_configs:
+            if not getattr(self.credential, required_config):
+                raise ValueError(
+                    f"Need to supply {required_config} in profile to submit python job"
+                )
+        self.client_options = ClientOptions(
+            api_endpoint="{}-dataproc.googleapis.com:443".format(
+                self.credential.dataproc_region
+            )
+        )
         return dataproc_v1.BatchControllerClient(
             client_options=self.client_options, credentials=self.GoogleCredentials
         )
