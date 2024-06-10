@@ -113,7 +113,6 @@ class DataProcStoredProcedureHelper(BaseDataProcHelper):
         database = self.parsed_model["database"]
         region = self.credential.location
         parent = f"projects/{database}/locations/{region}"
-
         request = bigquery_connection_v1.ListConnectionsRequest(parent=parent)
         existing_connections = conn_client.list_connections(request=request)
 
@@ -145,7 +144,7 @@ class DataProcStoredProcedureHelper(BaseDataProcHelper):
         sproc_ddl = f"""
         CREATE PROCEDURE `{sproc_name}`()
         EXTERNAL SECURITY INVOKER
-        WITH CONNECTION `{database}.{self.credential.dataproc_region}.{conn_name}`
+        WITH CONNECTION `{database}.{self.credential.location}.{conn_name}`
         OPTIONS(engine="SPARK", runtime_version="1.1", main_file_uri="{gcs_code_location_uri}")
         LANGUAGE PYTHON"""
         return sproc_name, sproc_ddl
