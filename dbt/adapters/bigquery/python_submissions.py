@@ -36,8 +36,7 @@ class BaseDataProcHelper(PythonJobHelper):
         identifier = parsed_model["alias"]
         self.parsed_model = parsed_model
         python_required_configs = [
-            "dataproc_region",
-            "gcs_bucket",
+            "gcs_bucket"
         ]
         for required_config in python_required_configs:
             if not getattr(credential, required_config):
@@ -186,6 +185,15 @@ class ClusterDataprocHelper(BaseDataProcHelper):
         )
 
     def _submit_dataproc_job(self) -> dataproc_v1.types.jobs.Job:
+        python_required_configs = [
+            "dataproc_region"
+        ]
+        for required_config in python_required_configs:
+            if not getattr(self.credential, required_config):
+                raise ValueError(
+                    f"Need to supply {required_config} in profile to submit python job"
+                )
+            
         job = {
             "placement": {"cluster_name": self._get_cluster_name()},
             "pyspark_job": {
