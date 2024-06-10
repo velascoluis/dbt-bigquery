@@ -56,7 +56,7 @@ setup(
         "google-cloud-bigquery[pandas]>=3.0,<4.0",
         "google-cloud-storage~=2.4",
         "google-cloud-dataproc~=5.0",
-        "google-cloud-bigquery-connection>=1.15.3"
+        "google-cloud-bigquery-connection>=1.15.3",
         # ----
         # Expect compatibility with all new versions of these packages, so lower bounds only.
         "google-api-core>=2.11.0",
