@@ -31,3 +31,5 @@ types-protobuf~=4.24
 types-requests~=2.31
 twine~=5.1
 wheel~=0.42
+nbformat~=5.10.4
+google-cloud-aiplatform~=1.60.0

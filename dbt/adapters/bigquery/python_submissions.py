@@ -1,4 +1,8 @@
 import uuid
+import nbformat
+import re
+import os
+
 from typing import Dict, Union
 
 from dbt.adapters.events.logging import AdapterLogger
@@ -11,6 +15,7 @@ from google.api_core import retry
 from google.api_core.client_options import ClientOptions
 from google.cloud import storage, dataproc_v1  # type: ignore
 from google.cloud.dataproc_v1.types.batches import Batch
+from google.cloud import aiplatform_v1beta1
 
 from dbt.adapters.bigquery.dataproc.batch import (
     create_batch_request,
@@ -21,6 +26,9 @@ from dbt.adapters.bigquery.dataproc.batch import (
 
 OPERATION_RETRY_TIME = 10
 logger = AdapterLogger("BigQuery")
+
+DEFAULT_VAI_NOTEBOOK_NAME = "Default"
+os.environ["GRPC_VERBOSITY"] = "NONE"
 
 
 class BaseDataProcHelper(PythonJobHelper):
@@ -43,11 +51,13 @@ class BaseDataProcHelper(PythonJobHelper):
                 raise ValueError(
                     f"Need to supply {required_config} in profile to submit python job"
                 )
+
         self.model_file_name = f"{schema}/{identifier}.py"
         self.credential = credential
         self.GoogleCredentials = BigQueryConnectionManager.get_credentials(credential)
         self.storage_client = storage.Client(
-            project=self.credential.execution_project, credentials=self.GoogleCredentials
+            project=self.credential.execution_project,
+            credentials=self.GoogleCredentials,
         )
         self.gcs_location = "gs://{}/{}".format(self.credential.gcs_bucket, self.model_file_name)
 
@@ -185,3 +195,117 @@ class ServerlessDataProcHelper(BaseDataProcHelper):
         if self.credential.dataproc_batch:
             batch = update_batch_from_config(self.credential.dataproc_batch, batch)
         return batch
+
+
+class BigFramesHelper(PythonJobHelper):
+    def __init__(self, parsed_model: Dict, credential: BigQueryCredentials) -> None:
+        """_summary_
+        Args:
+            credential (_type_): _description_
+        """
+
+        schema = parsed_model["schema"]
+        identifier = parsed_model["alias"]
+        self.parsed_model = parsed_model
+        python_required_configs = [
+            "bigframes_region",
+            "gcs_bucket",
+        ]
+        for required_config in python_required_configs:
+            if not getattr(credential, required_config):
+                raise ValueError(
+                    f"Need to supply {required_config} in profile to submit python job"
+                )
+
+        self.model_file_name = f"{schema}/{identifier}.py"
+        self.credential = credential
+        self.GoogleCredentials = BigQueryConnectionManager.get_credentials(credential)
+        self.storage_client = storage.Client(
+            project=self.credential.execution_project,
+            credentials=self.GoogleCredentials,
+        )
+        self.ai_platform_client = aiplatform_v1beta1.NotebookServiceClient(
+            credentials=self.GoogleCredentials,
+            client_options=ClientOptions(
+                api_endpoint=f"{self.credential.bigframes_region}-aiplatform.googleapis.com"
+            ),
+        )
+        if not getattr(credential, "bigframes_upload_notebook_gcs"):
+            self.credential.bigframes_upload_notebook_gcs = False
+        self.gcs_location = "gs://{}/{}".format(self.credential.gcs_bucket, self.model_file_name)
+        self.timeout = self.parsed_model["config"].get(
+            "timeout", self.credential.job_execution_timeout_seconds or 60 * 60 * 24
+        )
+        self.result_polling_policy = retry.Retry(
+            predicate=POLLING_PREDICATE, maximum=10.0, timeout=self.timeout
+        )
+
+    def _get_batch_id(self) -> str:
+        model = self.parsed_model
+        default_batch_id = str(uuid.uuid4())
+        return model["config"].get("batch_id", default_batch_id)
+
+    def _upload_to_gcs(self, filename: str, compiled_code: str) -> None:
+        bucket = self.storage_client.get_bucket(self.credential.gcs_bucket)
+        blob = bucket.blob(filename)
+        blob.upload_from_string(compiled_code)
+
+    def _py_to_ipynb(self, compiled_code):
+        nb = nbformat.v4.new_notebook()
+        nb.cells.append(nbformat.v4.new_code_cell(compiled_code))
+        return nbformat.writes(nb, nbformat.NO_CONVERT)
+
+    def submit(self, compiled_code: str):
+        notebook_compiled_code = self._py_to_ipynb(compiled_code)
+        notebook_template_id = self._get_notebook_template_id(
+            self.credential.bigframes_notebook_template_id
+        )
+        if self.credential.bigframes_upload_notebook_gcs:
+            self._upload_to_gcs(self.model_file_name, notebook_compiled_code)
+        return self._submit_bigframes_job(notebook_compiled_code, notebook_template_id)
+
+    def _get_notebook_template_id(self, notebook_template_id):
+        if not notebook_template_id:
+            # If not template id is specified, use the Default one
+            request = aiplatform_v1beta1.ListNotebookRuntimeTemplatesRequest(
+                parent=f"projects/{self.credential.execution_project}/locations/{self.credential.bigframes_region}",
+                filter=f'display_name = "{DEFAULT_VAI_NOTEBOOK_NAME}"',
+            )
+            page_result = self.ai_platform_client.list_notebook_runtime_templates(request=request)
+            if page_result:
+                # Extract template id from name
+                notebook_template_id = re.search(
+                    r"notebookRuntimeTemplates/(\d+)", next(iter(page_result)).name
+                ).group(1)
+                return notebook_template_id
+            else:
+                raise ValueError("No notebook runtime templates found, even Default.")
+        else:
+            return notebook_template_id
+
+    def _submit_bigframes_job(self, notebook_compiled_code, notebook_template_id):
+        notebook_execution_job = aiplatform_v1beta1.NotebookExecutionJob()
+        notebook_execution_job.notebook_runtime_template_resource_name = f"projects/{self.credential.execution_project}/locations/{self.credential.bigframes_region}/notebookRuntimeTemplates/{notebook_template_id}"
+
+        if self.credential.bigframes_upload_notebook_gcs:
+            notebook_execution_job.gcs_notebook_source = (
+                aiplatform_v1beta1.NotebookExecutionJob.GcsNotebookSource(uri=self.gcs_location)
+            )
+        else:
+            # Exec directly from raw bytes
+            notebook_compiled_code_bytes = notebook_compiled_code.encode("utf-8")
+            notebook_execution_job.direct_notebook_source = (
+                aiplatform_v1beta1.NotebookExecutionJob.DirectNotebookSource(
+                    content=notebook_compiled_code_bytes
+                )
+            )
+        notebook_execution_job.service_account = self.GoogleCredentials._service_account_email
+        notebook_execution_job.gcs_output_uri = "gs://{}/{}/logs".format(
+            self.credential.gcs_bucket, self.model_file_name
+        )
+        notebook_execution_job.display_name = self._get_batch_id()
+        request = aiplatform_v1beta1.CreateNotebookExecutionJobRequest(
+            parent=f"projects/{self.credential.execution_project}/locations/{self.credential.bigframes_region}",
+            notebook_execution_job=notebook_execution_job,
+        )
+        _ = self.ai_platform_client.create_notebook_execution_job(request=request).result()

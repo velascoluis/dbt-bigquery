@@ -29,6 +29,8 @@ class TestPythonListInference:
             # orc format also resolves the issue, regardless of list inference
             "orc_format.py": files.ORC_FORMAT,
             "disable_list_inference_orc_format.py": files.DISABLE_LIST_INFERENCE_ORC_FORMAT,
+            # bigframes tests
+            "bigframes.py": files.BIGFRAMES,
         }
 
     def test_models_success(self, project, models):

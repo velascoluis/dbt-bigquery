@@ -123,3 +123,23 @@ def model(dbt, session):
     return df
 
 """
+
+BIGFRAMES = """
+import pandas as pd
+def model(dbt, session):
+
+    dbt.config(
+        submission_method="bigframes",
+        dataframe_python_syntax="bigframes",
+        materialized="table"
+    )
+
+    df = pd.DataFrame(
+        [
+            {"column_name": {"name": "hello", "my_list": ["h", "e", "l", "l", "o"]}},
+        ]
+    )
+
+    bdf = bpd.DataFrame(df)
+    return bdf
+"""

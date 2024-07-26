@@ -20,12 +20,16 @@ import google.cloud.exceptions
 from google.api_core import retry, client_info
 from google.auth import impersonated_credentials
 from google.oauth2 import (
-    credentials as GoogleCredentials,
-    service_account as GoogleServiceAccountCredentials,
+    credentials as GoogleCredentials,  # type: ignore
+    service_account as GoogleServiceAccountCredentials,  # type: ignore
 )
 
 from dbt.adapters.bigquery import gcloud
-from dbt.adapters.contracts.connection import ConnectionState, AdapterResponse, Credentials
+from dbt.adapters.contracts.connection import (
+    ConnectionState,
+    AdapterResponse,
+    Credentials,
+)
 from dbt_common.exceptions import (
     DbtRuntimeError,
     DbtConfigError,
@@ -143,6 +147,10 @@ class BigQueryCredentials(Credentials):
     dataproc_region: Optional[str] = None
     dataproc_cluster_name: Optional[str] = None
     gcs_bucket: Optional[str] = None
+    # BigQuery Dataframes related config
+    bigframes_region: Optional[str] = None
+    bigframes_notebook_template_id: Optional[str] = None
+    bigframes_upload_notebook_gcs: Optional[bool] = None
 
     dataproc_batch: Optional[DataprocBatchConfig] = field(
         metadata={
@@ -237,7 +245,9 @@ class BigQueryConnectionManager(BaseConnectionManager):
         if hasattr(error, "query_job"):
             logger.error(
                 cls._bq_job_link(
-                    error.query_job.location, error.query_job.project, error.query_job.job_id
+                    error.query_job.location,
+                    error.query_job.project,
+                    error.query_job.job_id,
                 )
             )
         raise DbtDatabaseError(error_msg)
@@ -322,7 +332,7 @@ class BigQueryConnectionManager(BaseConnectionManager):
         return f"{rows_number:3.1f}{unit}".strip()
 
     @classmethod
-    def get_google_credentials(cls, profile_credentials) -> GoogleCredentials:
+    def get_google_credentials(cls, profile_credentials) -> GoogleCredentials:  # type: ignore
         method = profile_credentials.method
         creds = GoogleServiceAccountCredentials.Credentials
 
