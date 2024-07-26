@@ -133,13 +133,8 @@ def model(dbt, session):
         dataframe_python_syntax="bigframes",
         materialized="table"
     )
-
-    df = pd.DataFrame(
-        [
-            {"column_name": {"name": "hello", "my_list": ["h", "e", "l", "l", "o"]}},
-        ]
-    )
-
+    data = {'foo': [1, 2], 'bar': [3, 4]}
+    df = pd.DataFrame(data=data)
     bdf = bpd.DataFrame(df)
     return bdf
 """

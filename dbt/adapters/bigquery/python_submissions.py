@@ -230,6 +230,10 @@ class BigFramesHelper(PythonJobHelper):
                 api_endpoint=f"{self.credential.bigframes_region}-aiplatform.googleapis.com"
             ),
         )
+        if parsed_model["config"]["bigframes_notebook_template_id"]:
+            self.credential.bigframes_notebook_template_id = parsed_model["config"][
+                "bigframes_notebook_template_id"
+            ]
         if not getattr(credential, "bigframes_upload_notebook_gcs"):
             self.credential.bigframes_upload_notebook_gcs = False
         self.gcs_location = "gs://{}/{}".format(self.credential.gcs_bucket, self.model_file_name)
@@ -260,6 +264,7 @@ class BigFramesHelper(PythonJobHelper):
         notebook_template_id = self._get_notebook_template_id(
             self.credential.bigframes_notebook_template_id
         )
+
         if self.credential.bigframes_upload_notebook_gcs:
             self._upload_to_gcs(self.model_file_name, notebook_compiled_code)
         return self._submit_bigframes_job(notebook_compiled_code, notebook_template_id)
@@ -272,7 +277,7 @@ class BigFramesHelper(PythonJobHelper):
                 filter=f'display_name = "{DEFAULT_VAI_NOTEBOOK_NAME}"',
             )
             page_result = self.ai_platform_client.list_notebook_runtime_templates(request=request)
-            if page_result:
+            if len(list(page_result)) > 0:
                 # Extract template id from name
                 notebook_template_id = re.search(
                     r"notebookRuntimeTemplates/(\d+)", next(iter(page_result)).name

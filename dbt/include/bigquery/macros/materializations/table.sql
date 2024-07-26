@@ -135,6 +135,7 @@ df.write \
 {%- if dataframe_python_syntax == 'bigframes' %}
 import bigframes.pandas as bpd
 bpd.options.bigquery.project = "{{target.project}}"
+bpd.options.bigquery.location = "{{target.location}}"
 {{ compiled_code }}
 dbt = dbtObj(bpd.read_gbq)
 session = None
